@@ -4,29 +4,12 @@ import React from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { quickQuestions } from "@/lib/qna";
 
 interface Message {
   from: "bot" | "user";
   text: string;
 }
-
-const quickQuestions = [
-  "Dịch vụ này gồm những gì?",
-  "Bao lâu thì có kết quả xét duyệt?",
-  "Chi phí dịch vụ là bao nhiêu?",
-  "Tôi cần chuẩn bị giấy tờ gì?",
-];
-
-const cannedAnswers: Record<string, string> = {
-  "Dịch vụ này gồm những gì?":
-    "Bên mình lo phần đối chiếu điểm chuẩn, kiểm tra hồ sơ và tư vấn chọn trường, chia làm 2 gói: Cơ bản và Toàn diện.",
-  "Bao lâu thì có kết quả xét duyệt?":
-    "Nộp đủ giấy tờ là có kết quả đối chiếu điểm chuẩn ngay. Sau đó tư vấn viên sẽ gọi xác nhận lại với bạn trong vòng 24h.",
-  "Chi phí dịch vụ là bao nhiêu?":
-    "Gói Cơ bản 18.000.000₫, gói Toàn diện 45.000.000₫ nhé. Bạn kéo lên phần báo giá phía trên để xem chi tiết quyền lợi từng gói.",
-  "Tôi cần chuẩn bị giấy tờ gì?":
-    "3 thứ thôi: bảng điểm (PDF), ảnh chứng chỉ IELTS, và ảnh CMND/CCCD hoặc hộ chiếu.",
-};
 
 const initialMessages: Message[] = [
   { from: "bot", text: "Chào bạn! Mình là trợ lý ảo của DuHoc24, bạn cần hỗ trợ gì về hồ sơ du học?" },
@@ -36,16 +19,40 @@ export function ChatWidget() {
   const [open, setOpen] = React.useState(false);
   const [messages, setMessages] = React.useState<Message[]>(initialMessages);
   const [input, setInput] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
 
-  function sendMessage(text: string) {
-    if (!text.trim()) return;
-    const answer = cannedAnswers[text];
-    setMessages((prev) => [
-      ...prev,
-      { from: "user", text },
-      ...(answer ? [{ from: "bot" as const, text: answer }] : []),
-    ]);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, loading]);
+
+  async function sendMessage(text: string) {
+    const question = text.trim();
+    if (!question || loading) return;
+
+    const next: Message[] = [...messages, { from: "user", text: question }];
+    setMessages(next);
     setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next }),
+      });
+      const data = (await res.json()) as { reply?: string };
+      if (!res.ok || !data.reply) throw new Error("chat failed");
+      setMessages((prev) => [...prev, { from: "bot", text: data.reply! }]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { from: "bot", text: "Xin lỗi, mình chưa trả lời được lúc này. Bạn thử lại sau ít phút nhé." },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -55,7 +62,7 @@ export function ChatWidget() {
           <div className="flex items-center justify-between border-b bg-primary px-4 py-3 text-primary-foreground">
             <div>
               <p className="text-sm font-medium">Hỏi đáp nhanh</p>
-              <p className="text-xs opacity-80">Thường trả lời trong vài phút</p>
+              <p className="text-xs opacity-80">Trợ lý ảo trả lời tức thì</p>
             </div>
             <button
               onClick={() => setOpen(false)}
@@ -84,6 +91,14 @@ export function ChatWidget() {
                 </div>
               </div>
             ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2 text-sm text-muted-foreground">
+                  Đang trả lời...
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
           </div>
 
           <div className="border-t p-3">
@@ -92,6 +107,7 @@ export function ChatWidget() {
                 <button
                   key={q}
                   onClick={() => sendMessage(q)}
+                  disabled={loading}
                   className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground duration-150 hover:border-primary hover:text-primary"
                 >
                   {q}
@@ -111,7 +127,7 @@ export function ChatWidget() {
                 placeholder="Nhập câu hỏi của bạn..."
                 className="h-9 flex-1 rounded-full border border-input bg-transparent px-3.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               />
-              <Button type="submit" size="icon" className="shrink-0" aria-label="Gửi">
+              <Button type="submit" size="icon" className="shrink-0" aria-label="Gửi" disabled={loading}>
                 <Send className="size-4" />
               </Button>
             </form>
